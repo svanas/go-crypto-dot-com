@@ -342,7 +342,7 @@ func (client *Client) CancelOrder(symbol string, orderId int) error {
 	return nil
 }
 
-func (client *Client) OpenedOrders(symbol string) ([]Order, error) {
+func (client *Client) OpenOrders(symbol string) ([]Order, error) {
 	var (
 		err  error
 		data json.RawMessage
@@ -350,6 +350,27 @@ func (client *Client) OpenedOrders(symbol string) ([]Order, error) {
 	params := url.Values{}
 	params.Set("symbol", symbol)
 	if data, err = client.post("/v1/openOrders", params); err != nil {
+		return nil, err
+	}
+	type Output struct {
+		Count      int     `json:"count"`
+		ResultList []Order `json:"resultList"`
+	}
+	var output Output
+	if err = json.Unmarshal(data, &output); err != nil {
+		return nil, err
+	}
+	return output.ResultList, nil
+}
+
+func (client *Client) MyTrades(symbol string) ([]Order, error) {
+	var (
+		err  error
+		data json.RawMessage
+	)
+	params := url.Values{}
+	params.Set("symbol", symbol)
+	if data, err = client.post("/v1/myTrades", params); err != nil {
 		return nil, err
 	}
 	type Output struct {
