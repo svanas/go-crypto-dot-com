@@ -284,3 +284,29 @@ func (client *Client) Account() (*Account, error) {
 	}
 	return &output, nil
 }
+
+func (client *Client) CreateOrder(symbol string, side OrderSide, kind OrderType, quantity, price float64) (int, error) {
+	var (
+		err  error
+		data json.RawMessage
+	)
+	params := url.Values{}
+	params.Set("symbol", symbol)
+	params.Set("side", side.String())
+	params.Set("type", kind.String())
+	params.Set("volume", strconv.FormatFloat(quantity, 'f', -1, 64))
+	if kind != MARKET {
+		params.Add("price", strconv.FormatFloat(price, 'f', -1, 64))
+	}
+	if data, err = client.post("/v1/order", params); err != nil {
+		return 0, err
+	}
+	type Output struct {
+		OrderId int `json:"order_id"`
+	}
+	var output Output
+	if err = json.Unmarshal(data, &output); err != nil {
+		return 0, err
+	}
+	return output.OrderId, nil
+}
