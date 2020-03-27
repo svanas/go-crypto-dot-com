@@ -48,10 +48,10 @@ func TestTicker(t *testing.T) {
 func TestOrderBook(t *testing.T) {
 	client := New("", "")
 
-	ticker, err := client.OrderBook("ethbtc")
+	book, err := client.OrderBook("ethbtc")
 	if err != nil {
 		t.Errorf("OrderBook() failed: %v", err)
 	}
 
-	t.Logf("%+v", ticker)
+	t.Logf("%+v", book)
 }

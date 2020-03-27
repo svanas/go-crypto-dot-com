@@ -1,11 +1,16 @@
 package crypto
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -83,6 +88,7 @@ func (client *Client) get(path string, params *url.Values) (json.RawMessage, err
 	}
 	defer resp.Body.Close()
 
+	// read the body of the response into a byte array
 	var body []byte
 	if body, err = ioutil.ReadAll(resp.Body); err != nil {
 		return nil, err
@@ -100,6 +106,95 @@ func (client *Client) get(path string, params *url.Values) (json.RawMessage, err
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET %s %s", resp.Status, path)
+	}
+
+	var output Response
+	if err = json.Unmarshal(body, &output); err != nil {
+		return nil, err
+	}
+
+	return output.Data, nil
+}
+
+func (client *Client) post(path string, params url.Values) ([]byte, error) {
+	var err error
+
+	// satisfy the rate limiter
+	if err = BeforeRequest("POST", path); err != nil {
+		return nil, err
+	}
+	defer func() {
+		AfterRequest()
+	}()
+
+	var endpoint *url.URL
+	if endpoint, err = url.Parse(client.URL); err != nil {
+		return nil, err
+	}
+
+	// set the endpoint for this request
+	endpoint.Path += path
+
+	// add API key & time to params
+	params.Set("api_key", client.Key)
+	time := time.Now().UnixNano() / int64(time.Millisecond/time.Nanosecond)
+	params.Set("time", strconv.FormatInt(time, 10))
+
+	// add signature to params
+	keys := make([]string, 0, len(params))
+	for key := range params {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var buf strings.Builder
+	for _, key := range keys {
+		value := params.Get(key)
+		if value != "" {
+			buf.WriteString(key)
+			buf.WriteString(value)
+		}
+	}
+	buf.WriteString(client.Secret)
+	hash := sha256.New()
+	hash.Write([]byte(buf.String()))
+	params.Set("sign", hex.EncodeToString(hash.Sum(nil)))
+
+	// encode the url.Values into the request body
+	var input *strings.Reader
+	input = strings.NewReader(params.Encode())
+
+	// create the request
+	var req *http.Request
+	if req, err = http.NewRequest("POST", endpoint.String(), input); err != nil {
+		return nil, err
+	}
+	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+	// submit the http request
+	var resp *http.Response
+	if resp, err = http.DefaultClient.Do(req); err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// read the body of the response into a byte array
+	var body []byte
+	if body, err = ioutil.ReadAll(resp.Body); err != nil {
+		return nil, err
+	}
+
+	// is this an error?
+	status := make(map[string]interface{})
+	if json.Unmarshal(body, &status) == nil {
+		if msg, ok := status["msg"]; ok {
+			if msg != "suc" {
+				return nil, fmt.Errorf("%v", msg)
+			}
+		}
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("POST %s %s", resp.Status, path)
 	}
 
 	var output Response
@@ -169,6 +264,21 @@ func (client *Client) OrderBook(symbol string) (*OrderBook, error) {
 		return nil, err
 	}
 	var output OrderBook
+	if err = json.Unmarshal(data, &output); err != nil {
+		return nil, err
+	}
+	return &output, nil
+}
+
+func (client *Client) Account() (*Account, error) {
+	var (
+		err  error
+		data json.RawMessage
+	)
+	if data, err = client.post("/v1/account", url.Values{}); err != nil {
+		return nil, err
+	}
+	var output Account
 	if err = json.Unmarshal(data, &output); err != nil {
 		return nil, err
 	}
