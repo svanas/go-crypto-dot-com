@@ -310,3 +310,21 @@ func (client *Client) CreateOrder(symbol string, side OrderSide, kind OrderType,
 	}
 	return output.OrderId, nil
 }
+
+func (client *Client) GetOrder(symbol string, orderId int) (*Order, error) {
+	var (
+		err  error
+		data json.RawMessage
+	)
+	params := url.Values{}
+	params.Set("symbol", symbol)
+	params.Set("order_id", strconv.Itoa(orderId))
+	if data, err = client.post("/v1/showOrder", params); err != nil {
+		return nil, err
+	}
+	var output Order
+	if err = json.Unmarshal(data, &output); err != nil {
+		return nil, err
+	}
+	return &output, nil
+}
