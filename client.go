@@ -328,3 +328,13 @@ func (client *Client) GetOrder(symbol string, orderId int) (*Order, error) {
 	}
 	return &output, nil
 }
+
+func (client *Client) CancelOrder(symbol string, orderId int) error {
+	params := url.Values{}
+	params.Set("symbol", symbol)
+	params.Set("order_id", strconv.Itoa(orderId))
+	if _, err := client.post("/v1/orders/cancel", params); err != nil {
+		return err
+	}
+	return nil
+}
