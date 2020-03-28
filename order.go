@@ -1,5 +1,10 @@
 package crypto
 
+import (
+	"strings"
+	"time"
+)
+
 type OrderSide int
 
 const (
@@ -51,8 +56,8 @@ type Order struct {
 	Side         string  `json:"side"`
 	TotalPrice   float64 `json:"total_price,string"`
 	Fee          float64 `json:"fee,string"`
-	CreatedAt    int     `json:"created_at"`
-	UpdatedAt    int     `json:"updated_at"`
+	CreatedAt    int64   `json:"created_at"`
+	UpdatedAt    int64   `json:"updated_at"`
 	DealPrice    float64 `json:"deal_price,string"`
 	AvgPrice     float64 `json:"avg_price,string"`
 	CountCoin    string  `json:"countCoin"`
@@ -68,4 +73,42 @@ type Order struct {
 	RemainVolume float64 `json:"remain_volume,string"`
 	BaseCoin     string  `json:"baseCoin"`
 	Status       int     `json:"status"`
+}
+
+func (order *Order) GetSide() OrderSide {
+	for os := range OrderSideString {
+		if os.String() == order.Side {
+			return os
+		}
+	}
+	return ORDER_SIDE_UNKNOWN
+}
+
+func (order *Order) GetType() OrderType {
+	switch order.Type {
+	case 1:
+		return LIMIT
+	case 2:
+		return MARKET
+	default:
+		return ORDER_TYPE_UNKNOWN
+	}
+}
+
+func (order *Order) GetCreatedAt() time.Time {
+	if order.CreatedAt > 0 {
+		return time.Unix(order.CreatedAt/1000, 0)
+	}
+	return time.Time{}
+}
+
+func (order *Order) GetUpdatedAt() time.Time {
+	if order.UpdatedAt > 0 {
+		return time.Unix(order.UpdatedAt/1000, 0)
+	}
+	return time.Time{}
+}
+
+func (order *Order) GetSymbol() string {
+	return strings.ToLower(order.BaseCoin + order.CountCoin)
 }
