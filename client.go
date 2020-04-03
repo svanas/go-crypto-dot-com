@@ -363,7 +363,7 @@ func (client *Client) OpenOrders(symbol string) ([]Order, error) {
 	return output.ResultList, nil
 }
 
-func (client *Client) MyTrades(symbol string) ([]Order, error) {
+func (client *Client) MyTrades(symbol string) ([]Trade, error) {
 	var (
 		err  error
 		data json.RawMessage
@@ -375,11 +375,16 @@ func (client *Client) MyTrades(symbol string) ([]Order, error) {
 	}
 	type Output struct {
 		Count      int     `json:"count"`
-		ResultList []Order `json:"resultList"`
+		ResultList []Trade `json:"resultList"`
 	}
 	var output Output
 	if err = json.Unmarshal(data, &output); err != nil {
 		return nil, err
 	}
-	return output.ResultList, nil
+	var result []Trade
+	for _, trade := range output.ResultList {
+		trade.Symbol = symbol
+		result = append(result, trade)
+	}
+	return result, nil
 }
