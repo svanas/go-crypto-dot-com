@@ -16,23 +16,52 @@ import (
 
 const endpoint = "https://api.crypto.com"
 
+type rateLimit int
+
+const (
+	RATE_LIMIT_NORMAL rateLimit = iota
+	RATE_LIMIT_COOL_DOWN
+)
+
+var RequestsPerSecond = map[rateLimit]float64{
+	RATE_LIMIT_NORMAL:    10, // 10 req/second (default)
+	RATE_LIMIT_COOL_DOWN: 1,  // 1 req/seconds
+}
+
 var (
-	lastRequest       time.Time
-	RequestsPerSecond float64                         = 10
-	BeforeRequest     func(method, path string) error = nil
-	AfterRequest      func()                          = nil
+	cooldown    bool
+	lastRequest time.Time
+)
+
+func getRequestsPerSecond() float64 {
+	if cooldown {
+		cooldown = false
+		return RequestsPerSecond[RATE_LIMIT_COOL_DOWN]
+	}
+	return RequestsPerSecond[RATE_LIMIT_NORMAL]
+}
+
+var (
+	BeforeRequest    func(method, path string) error = nil
+	AfterRequest     func()                          = nil
+	OnRateLimitError func(method, path string) error = nil
 )
 
 func init() {
 	BeforeRequest = func(method, path string) error {
 		elapsed := time.Since(lastRequest)
-		if elapsed.Seconds() < (float64(1) / RequestsPerSecond) {
-			time.Sleep(time.Duration((float64(time.Second) / RequestsPerSecond) - float64(elapsed)))
+		rps := getRequestsPerSecond()
+		if elapsed.Seconds() < (float64(1) / rps) {
+			time.Sleep(time.Duration((float64(time.Second) / rps) - float64(elapsed)))
 		}
 		return nil
 	}
 	AfterRequest = func() {
 		lastRequest = time.Now()
+	}
+	OnRateLimitError = func(method, path string) error {
+		cooldown = true
+		return nil
 	}
 }
 
@@ -92,6 +121,13 @@ func (client *Client) get(path string, params *url.Values) (json.RawMessage, err
 	var body []byte
 	if body, err = ioutil.ReadAll(resp.Body); err != nil {
 		return nil, err
+	}
+
+	// are we exceeding the rate limits?
+	if resp.StatusCode == http.StatusTooManyRequests {
+		if err = OnRateLimitError("GET", path); err != nil {
+			return nil, err
+		}
 	}
 
 	// is this an error?
@@ -181,6 +217,13 @@ func (client *Client) post(path string, params url.Values) ([]byte, error) {
 	var body []byte
 	if body, err = ioutil.ReadAll(resp.Body); err != nil {
 		return nil, err
+	}
+
+	// are we exceeding the rate limits?
+	if resp.StatusCode == http.StatusTooManyRequests {
+		if err = OnRateLimitError("POST", path); err != nil {
+			return nil, err
+		}
 	}
 
 	// is this an error?
