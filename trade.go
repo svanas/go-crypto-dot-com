@@ -12,7 +12,7 @@ type Trade struct {
 	CTime     int64   `json:"ctime"`
 	DealPrice float64 `json:"deal_price,string"`
 	Type      string  `json:"type"`
-	Symbol    string  `json:"-"`
+	Symbol    string  `json:"symbol"`
 }
 
 func (trade *Trade) GetSide() OrderSide {

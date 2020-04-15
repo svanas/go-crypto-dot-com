@@ -24,8 +24,8 @@ const (
 )
 
 var RequestsPerSecond = map[rateLimit]float64{
-	RATE_LIMIT_NORMAL:    10, // 10 req/second (default)
-	RATE_LIMIT_COOL_DOWN: 1,  // 1 req/seconds
+	RATE_LIMIT_NORMAL:    1,          // 1 req/second (default)
+	RATE_LIMIT_COOL_DOWN: 0.01666666, // 1 req/minute
 }
 
 var (
