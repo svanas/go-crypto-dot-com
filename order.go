@@ -76,11 +76,9 @@ type Order struct {
 }
 
 func (order *Order) GetSide() OrderSide {
-	if order.Status != ORDER_STATUS_INIT {
-		for os := range OrderSideString {
-			if os.String() == order.Side {
-				return os
-			}
+	for os := range OrderSideString {
+		if os.String() == order.Side {
+			return os
 		}
 	}
 	return ORDER_SIDE_UNKNOWN
