@@ -14,7 +14,10 @@ import (
 	"time"
 )
 
-const endpoint = "https://api.crypto.com"
+const (
+	pageSize = 50
+	endpoint = "https://api.crypto.com"
+)
 
 type rateLimit int
 
@@ -87,6 +90,18 @@ type Response struct {
 
 func (resp *Response) success() bool {
 	return resp.Code == 0 && resp.Msg == "suc"
+}
+
+func params(symbol string, page, pageSize int) url.Values {
+	output := url.Values{}
+	output.Set("symbol", symbol)
+	if page > 0 {
+		output.Set("page", strconv.Itoa(page))
+	}
+	if pageSize > 0 {
+		output.Set("pageSize", strconv.Itoa(pageSize))
+	}
+	return output
 }
 
 func (client *Client) get(path string, params *url.Values) (json.RawMessage, error) {
@@ -386,48 +401,91 @@ func (client *Client) CancelOrder(symbol string, orderId int) error {
 }
 
 func (client *Client) OpenOrders(symbol string) ([]Order, error) {
+	call := func(params url.Values) (int, []Order, error) {
+		var (
+			err  error
+			data json.RawMessage
+		)
+		if data, err = client.post("/v1/openOrders", params); err != nil {
+			return 0, nil, err
+		}
+		type Output struct {
+			Count      int     `json:"count"`
+			ResultList []Order `json:"resultList"`
+		}
+		var output Output
+		if err = json.Unmarshal(data, &output); err != nil {
+			return 0, nil, err
+		}
+		return output.Count, output.ResultList, nil
+	}
+
 	var (
-		err  error
-		data json.RawMessage
+		page   int = 1
+		result []Order
 	)
-	params := url.Values{}
-	params.Set("symbol", symbol)
-	if data, err = client.post("/v1/openOrders", params); err != nil {
+
+	count, orders, err := call(params(symbol, page, pageSize))
+	if err != nil {
 		return nil, err
 	}
-	type Output struct {
-		Count      int     `json:"count"`
-		ResultList []Order `json:"resultList"`
+	result = append(result, orders...)
+
+	for len(result) < count {
+		page++
+		_, orders, err := call(params(symbol, page, pageSize))
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, orders...)
 	}
-	var output Output
-	if err = json.Unmarshal(data, &output); err != nil {
-		return nil, err
-	}
-	return output.ResultList, nil
+
+	return result, nil
 }
 
 func (client *Client) MyTrades(symbol string) ([]Trade, error) {
+	call := func(params url.Values) (int, []Trade, error) {
+		var (
+			err  error
+			data json.RawMessage
+		)
+		if data, err = client.post("/v1/myTrades", params); err != nil {
+			return 0, nil, err
+		}
+		type Output struct {
+			Count      int     `json:"count"`
+			ResultList []Trade `json:"resultList"`
+		}
+		var output Output
+		if err = json.Unmarshal(data, &output); err != nil {
+			return 0, nil, err
+		}
+		return output.Count, output.ResultList, nil
+	}
+
 	var (
-		err  error
-		data json.RawMessage
+		page   int = 1
+		result []Trade
 	)
-	params := url.Values{}
-	params.Set("symbol", symbol)
-	if data, err = client.post("/v1/myTrades", params); err != nil {
+
+	count, trades, err := call(params(symbol, page, pageSize))
+	if err != nil {
 		return nil, err
 	}
-	type Output struct {
-		Count      int     `json:"count"`
-		ResultList []Trade `json:"resultList"`
+	result = append(result, trades...)
+
+	for len(result) < count {
+		page++
+		_, trades, err := call(params(symbol, page, pageSize))
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, trades...)
 	}
-	var output Output
-	if err = json.Unmarshal(data, &output); err != nil {
-		return nil, err
+
+	for i := range result {
+		result[i].Symbol = symbol
 	}
-	var result []Trade
-	for _, trade := range output.ResultList {
-		trade.Symbol = symbol
-		result = append(result, trade)
-	}
+
 	return result, nil
 }

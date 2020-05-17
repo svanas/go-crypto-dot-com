@@ -39,7 +39,7 @@ func TestTicker(t *testing.T) {
 
 	ticker, err := client.Ticker("ethbtc")
 	if err != nil {
-		t.Errorf("Ticker() failed: %v", err)
+		t.Errorf("Ticker(\"ethbtc\") failed: %v", err)
 	}
 
 	t.Logf("%+v", ticker)
@@ -50,7 +50,7 @@ func TestOrderBook(t *testing.T) {
 
 	book, err := client.OrderBook("ethbtc")
 	if err != nil {
-		t.Errorf("OrderBook() failed: %v", err)
+		t.Errorf("OrderBook(\"ethbtc\") failed: %v", err)
 	}
 
 	t.Logf("%+v", book)
