@@ -390,10 +390,10 @@ func (client *Client) GetOrder(symbol string, orderId int) (*Order, error) {
 	return &output.OrderInfo, nil
 }
 
-func (client *Client) CancelOrder(symbol string, orderId int) error {
+func (client *Client) CancelOrder(symbol string, orderId int64) error {
 	params := url.Values{}
 	params.Set("symbol", symbol)
-	params.Set("order_id", strconv.Itoa(orderId))
+	params.Set("order_id", strconv.FormatInt(orderId, 10))
 	if _, err := client.post("/v1/orders/cancel", params); err != nil {
 		return err
 	}

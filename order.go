@@ -52,7 +52,7 @@ const (
 )
 
 type Order struct {
-	Id           int         `json:"id"`
+	Id           int64       `json:"id"`
 	Side         string      `json:"side"`
 	TotalPrice   float64     `json:"total_price,string"`
 	Fee          float64     `json:"fee,string"`

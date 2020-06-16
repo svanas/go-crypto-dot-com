@@ -3,7 +3,7 @@ package crypto
 import "time"
 
 type Trade struct {
-	Id        int     `json:"id"`
+	Id        int64   `json:"id,string"`
 	Volume    float64 `json:"volume,string"`
 	Side      string  `json:"side"`
 	FeeCoin   string  `json:"feeCoin"`
