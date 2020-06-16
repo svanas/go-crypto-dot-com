@@ -8,8 +8,6 @@ type Ticker struct {
 	Low    float64 `json:"low,string"`
 	Buy    float64 `json:"buy,string"`
 	Sell   float64 `json:"sell,string"`
-	Change float64 `json:"change,string"`
-	Rose   float64 `json:"rose,string"`
 }
 
 type Tickers struct {

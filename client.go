@@ -45,13 +45,13 @@ func getRequestsPerSecond() float64 {
 }
 
 var (
-	BeforeRequest    func(method, path string) error = nil
-	AfterRequest     func()                          = nil
-	OnRateLimitError func(method, path string) error = nil
+	BeforeRequest    func(method, path string, params *url.Values) error = nil
+	AfterRequest     func()                                              = nil
+	OnRateLimitError func(method, path string) error                     = nil
 )
 
 func init() {
-	BeforeRequest = func(method, path string) error {
+	BeforeRequest = func(method, path string, params *url.Values) error {
 		elapsed := time.Since(lastRequest)
 		rps := getRequestsPerSecond()
 		if elapsed.Seconds() < (float64(1) / rps) {
@@ -83,18 +83,18 @@ func New(apiKey, apiSecret string) *Client {
 }
 
 type Response struct {
-	Code int             `json:"code,string"`
+	Code interface{}     `json:"code"`
 	Msg  string          `json:"msg"`
 	Data json.RawMessage `json:"data"`
 }
 
 func (resp *Response) success() bool {
-	return resp.Code == 0 && resp.Msg == "suc"
+	return (resp.Code == 0 || resp.Code == "0") && resp.Msg == "suc"
 }
 
 func params(symbol string, page, pageSize int) url.Values {
 	output := url.Values{}
-	output.Set("symbol", symbol)
+	output.Set("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
 	if page > 0 {
 		output.Set("page", strconv.Itoa(page))
 	}
@@ -108,7 +108,7 @@ func (client *Client) get(path string, params *url.Values) (json.RawMessage, err
 	var err error
 
 	// satisfy the rate limiter
-	if err = BeforeRequest("GET", path); err != nil {
+	if err = BeforeRequest("GET", path, params); err != nil {
 		return nil, err
 	}
 	defer func() {
@@ -171,7 +171,7 @@ func (client *Client) post(path string, params url.Values) ([]byte, error) {
 	var err error
 
 	// satisfy the rate limiter
-	if err = BeforeRequest("POST", path); err != nil {
+	if err = BeforeRequest("POST", path, &params); err != nil {
 		return nil, err
 	}
 	defer func() {
@@ -299,7 +299,7 @@ func (client *Client) Ticker(symbol string) (*Ticker, error) {
 		data json.RawMessage
 	)
 	params := url.Values{}
-	params.Add("symbol", symbol)
+	params.Add("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
 	if data, err = client.get("/v1/ticker", &params); err != nil {
 		return nil, err
 	}
@@ -316,7 +316,7 @@ func (client *Client) OrderBook(symbol string) (*OrderBook, error) {
 		data json.RawMessage
 	)
 	params := url.Values{}
-	params.Add("symbol", symbol)
+	params.Add("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
 	params.Add("type", "step0")
 	if data, err = client.get("/v1/depth", &params); err != nil {
 		return nil, err
@@ -343,13 +343,13 @@ func (client *Client) Account() (*Account, error) {
 	return &output, nil
 }
 
-func (client *Client) CreateOrder(symbol string, side OrderSide, kind OrderType, quantity, price float64) (int, error) {
+func (client *Client) CreateOrder(symbol string, side OrderSide, kind OrderType, quantity, price float64) (int64, error) {
 	var (
 		err  error
 		data json.RawMessage
 	)
 	params := url.Values{}
-	params.Set("symbol", symbol)
+	params.Set("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
 	params.Set("side", side.String())
 	params.Set("type", kind.String())
 	params.Set("volume", strconv.FormatFloat(quantity, 'f', -1, 64))
@@ -360,7 +360,7 @@ func (client *Client) CreateOrder(symbol string, side OrderSide, kind OrderType,
 		return 0, err
 	}
 	type Output struct {
-		OrderId int `json:"order_id"`
+		OrderId int64 `json:"order_id,string"`
 	}
 	var output Output
 	if err = json.Unmarshal(data, &output); err != nil {
@@ -369,14 +369,14 @@ func (client *Client) CreateOrder(symbol string, side OrderSide, kind OrderType,
 	return output.OrderId, nil
 }
 
-func (client *Client) GetOrder(symbol string, orderId int) (*Order, error) {
+func (client *Client) GetOrder(symbol string, orderId int64) (*Order, error) {
 	var (
 		err  error
 		data json.RawMessage
 	)
 	params := url.Values{}
-	params.Set("symbol", symbol)
-	params.Set("order_id", strconv.Itoa(orderId))
+	params.Set("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
+	params.Set("order_id", strconv.FormatInt(orderId, 10))
 	if data, err = client.post("/v1/showOrder", params); err != nil {
 		return nil, err
 	}
@@ -392,7 +392,7 @@ func (client *Client) GetOrder(symbol string, orderId int) (*Order, error) {
 
 func (client *Client) CancelOrder(symbol string, orderId int64) error {
 	params := url.Values{}
-	params.Set("symbol", symbol)
+	params.Set("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
 	params.Set("order_id", strconv.FormatInt(orderId, 10))
 	if _, err := client.post("/v1/orders/cancel", params); err != nil {
 		return err
@@ -421,7 +421,7 @@ func (client *Client) OpenOrders(symbol string) ([]Order, error) {
 	}
 
 	var (
-		page   int = 1
+		page   int = 0
 		result []Order
 	)
 
@@ -464,7 +464,7 @@ func (client *Client) MyTrades(symbol string) ([]Trade, error) {
 	}
 
 	var (
-		page   int = 1
+		page   int = 0
 		result []Trade
 	)
 

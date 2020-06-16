@@ -37,9 +37,9 @@ func TestTickers(t *testing.T) {
 func TestTicker(t *testing.T) {
 	client := New("", "")
 
-	ticker, err := client.Ticker("ethbtc")
+	ticker, err := client.Ticker("ETH_BTC")
 	if err != nil {
-		t.Errorf("Ticker(\"ethbtc\") failed: %v", err)
+		t.Errorf("Ticker(\"ETH_BTC\") failed: %v", err)
 	}
 
 	t.Logf("%+v", ticker)
@@ -48,9 +48,9 @@ func TestTicker(t *testing.T) {
 func TestOrderBook(t *testing.T) {
 	client := New("", "")
 
-	book, err := client.OrderBook("ethbtc")
+	book, err := client.OrderBook("ETH_BTC")
 	if err != nil {
-		t.Errorf("OrderBook(\"ethbtc\") failed: %v", err)
+		t.Errorf("OrderBook(\"ETH_BTC\") failed: %v", err)
 	}
 
 	t.Logf("%+v", book)

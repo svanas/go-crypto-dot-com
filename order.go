@@ -52,7 +52,7 @@ const (
 )
 
 type Order struct {
-	Id           int64       `json:"id"`
+	Id           int64       `json:"id,string"`
 	Side         string      `json:"side"`
 	TotalPrice   float64     `json:"total_price,string"`
 	Fee          float64     `json:"fee,string"`
@@ -66,7 +66,6 @@ type Order struct {
 	SideMsg      string      `json:"side_msg"`
 	Volume       float64     `json:"volume,string"`
 	Price        float64     `json:"price,string"`
-	SourceMsg    string      `json:"source_msg"`
 	StatusMsg    string      `json:"status_msg"`
 	DealVolume   float64     `json:"deal_volume,string"`
 	FeeCoin      string      `json:"fee_coin"`
@@ -110,5 +109,5 @@ func (order *Order) GetUpdatedAt() time.Time {
 }
 
 func (order *Order) GetSymbol() string {
-	return strings.ToLower(order.BaseCoin + order.CountCoin)
+	return strings.ToUpper(order.BaseCoin) + "_" + strings.ToUpper(order.CountCoin)
 }
