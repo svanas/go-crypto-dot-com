@@ -317,7 +317,6 @@ func (client *Client) OrderBook(symbol string) (*OrderBook, error) {
 	)
 	params := url.Values{}
 	params.Add("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
-	params.Add("type", "step0")
 	if data, err = client.get("/v1/depth", &params); err != nil {
 		return nil, err
 	}
