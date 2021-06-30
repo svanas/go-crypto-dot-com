@@ -1,6 +1,6 @@
 # go-crypto-dot-com
 
-Go client for the crypto.com API https://crypto.com/exchange-doc
+Go client for the crypto.com API v1 https://crypto.com/exchange-docs-v1
 
 ## Installation
 
