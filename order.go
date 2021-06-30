@@ -54,24 +54,24 @@ const (
 type Order struct {
 	Id           int64       `json:"id,string"`
 	Side         string      `json:"side"`
-	TotalPrice   float64     `json:"total_price,string"`
-	Fee          float64     `json:"fee,string"`
-	CreatedAt    int64       `json:"created_at"`
-	UpdatedAt    int64       `json:"updated_at"`
-	DealPrice    float64     `json:"deal_price,string"`
-	AvgPrice     float64     `json:"avg_price,string"`
-	CountCoin    string      `json:"countCoin"`
-	Source       int         `json:"source"`
-	Type         interface{} `json:"type"`
-	SideMsg      string      `json:"side_msg"`
-	Volume       float64     `json:"volume,string"`
-	Price        float64     `json:"price,string"`
-	StatusMsg    string      `json:"status_msg"`
-	DealVolume   float64     `json:"deal_volume,string"`
-	FeeCoin      string      `json:"fee_coin"`
-	RemainVolume float64     `json:"remain_volume,string"`
-	BaseCoin     string      `json:"baseCoin"`
-	Status       int         `json:"status"`
+	TotalPrice   float64     `json:"total_price,string,omitempty"`
+	Fee          float64     `json:"fee,string,omitempty"`
+	CreatedAt    int64       `json:"created_at,omitempty"`
+	UpdatedAt    int64       `json:"updated_at,omitempty"`
+	DealPrice    float64     `json:"deal_price,string,omitempty"`
+	AvgPrice     float64     `json:"avg_price,string,omitempty"`
+	CountCoin    string      `json:"countCoin,omitempty"`
+	Source       int         `json:"source,omitempty"`
+	Type         interface{} `json:"type,omitempty"`
+	SideMsg      string      `json:"side_msg,omitempty"`
+	Volume       float64     `json:"volume,string,omitempty"`
+	Price        float64     `json:"price,string,omitempty"`
+	StatusMsg    string      `json:"status_msg,omitempty"`
+	DealVolume   float64     `json:"deal_volume,string,omitempty"`
+	FeeCoin      string      `json:"fee_coin,omitempty"`
+	RemainVolume float64     `json:"remain_volume,string,omitempty"`
+	BaseCoin     string      `json:"baseCoin,omitempty"`
+	Status       int         `json:"status,omitempty"`
 }
 
 func (order *Order) GetSide() OrderSide {
