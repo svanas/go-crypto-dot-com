@@ -69,9 +69,10 @@ func init() {
 }
 
 type Client struct {
-	URL    string
-	Key    string
-	Secret string
+	URL        string
+	Key        string
+	Secret     string
+	httpClient *http.Client
 }
 
 func New(apiKey, apiSecret string) *Client {
@@ -79,6 +80,9 @@ func New(apiKey, apiSecret string) *Client {
 		URL:    endpoint,
 		Key:    apiKey,
 		Secret: apiSecret,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}
 }
 
@@ -127,7 +131,7 @@ func (client *Client) get(path string, params *url.Values) (json.RawMessage, err
 	}
 
 	var resp *http.Response
-	if resp, err = http.Get(endpoint.String()); err != nil {
+	if resp, err = client.httpClient.Get(endpoint.String()); err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -223,7 +227,7 @@ func (client *Client) post(path string, params url.Values) ([]byte, error) {
 
 	// submit the http request
 	var resp *http.Response
-	if resp, err = http.DefaultClient.Do(req); err != nil {
+	if resp, err = client.httpClient.Do(req); err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
