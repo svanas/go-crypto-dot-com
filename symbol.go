@@ -1,9 +1,9 @@
 package crypto
 
 type Symbol struct {
-	Symbol          string `json:"symbol"`
-	CountCoin       string `json:"count_coin"`
-	AmountPrecision int    `json:"amount_precision"`
-	BaseCoin        string `json:"base_coin"`
-	PricePrecision  int    `json:"price_precision"`
+	Symbol           string `json:"instrument_name"`
+	QuoteCurrency    string `json:"quote_currency"`
+	BaseCurrency     string `json:"base_currency"`
+	PriceDecimals    int    `json:"price_decimals"`
+	QuantityDecimals int    `json:"quantity_decimals"`
 }

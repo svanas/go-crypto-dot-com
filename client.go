@@ -86,14 +86,15 @@ func New(apiKey, apiSecret string) *Client {
 	}
 }
 
-type Response struct {
+type Response1 struct {
 	Code interface{}     `json:"code"`
 	Msg  string          `json:"msg"`
 	Data json.RawMessage `json:"data"`
 }
 
-func (resp *Response) success() bool {
-	return (resp.Code == 0 || resp.Code == "0") && resp.Msg == "suc"
+type Response2 struct {
+	Code   interface{}     `json:"code"`
+	Result json.RawMessage `json:"result"`
 }
 
 func params(symbol string, page, pageSize int) url.Values {
@@ -163,12 +164,75 @@ func (client *Client) get(path string, params *url.Values) (json.RawMessage, err
 		return nil, fmt.Errorf("GET %s %s", resp.Status, path)
 	}
 
-	var output Response
+	var output Response1
 	if err = json.Unmarshal(body, &output); err != nil {
 		return nil, err
 	}
 
 	return output.Data, nil
+}
+
+func (client *Client) get2(path string, params *url.Values) (json.RawMessage, error) {
+	var err error
+
+	// satisfy the rate limiter
+	if err = BeforeRequest("GET", path, params); err != nil {
+		return nil, err
+	}
+	defer func() {
+		AfterRequest()
+	}()
+
+	var endpoint *url.URL
+	if endpoint, err = url.Parse(client.URL); err != nil {
+		return nil, err
+	}
+
+	// set the endpoint for this request
+	endpoint.Path += path
+	if params != nil {
+		endpoint.RawQuery = params.Encode()
+	}
+
+	var resp *http.Response
+	if resp, err = client.httpClient.Get(endpoint.String()); err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// read the body of the response into a byte array
+	var body []byte
+	if body, err = ioutil.ReadAll(resp.Body); err != nil {
+		return nil, err
+	}
+
+	// are we exceeding the rate limits?
+	if resp.StatusCode == http.StatusTooManyRequests {
+		if err = OnRateLimitError("GET", path); err != nil {
+			return nil, err
+		}
+	}
+
+	// is this an error?
+	status := make(map[string]interface{})
+	if json.Unmarshal(body, &status) == nil {
+		if code, ok := status["code"]; ok {
+			if code != float64(0) {
+				return nil, fmt.Errorf("GET error code %v %s", code, path)
+			}
+		}
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("GET %s %s", resp.Status, path)
+	}
+
+	var output Response2
+	if err = json.Unmarshal(body, &output); err != nil {
+		return nil, err
+	}
+
+	return output.Result, nil
 }
 
 func (client *Client) post(path string, params url.Values) ([]byte, error) {
@@ -259,7 +323,7 @@ func (client *Client) post(path string, params url.Values) ([]byte, error) {
 		return nil, fmt.Errorf("POST %s %s", resp.Status, path)
 	}
 
-	var output Response
+	var output Response1
 	if err = json.Unmarshal(body, &output); err != nil {
 		return nil, err
 	}
@@ -269,17 +333,20 @@ func (client *Client) post(path string, params url.Values) ([]byte, error) {
 
 func (client *Client) Symbols() ([]Symbol, error) {
 	var (
-		err  error
-		data json.RawMessage
+		err error
+		raw json.RawMessage
 	)
-	if data, err = client.get("/v1/symbols", nil); err != nil {
+	if raw, err = client.get2("/v2/public/get-instruments", nil); err != nil {
 		return nil, err
 	}
-	var output []Symbol
-	if err = json.Unmarshal(data, &output); err != nil {
+	type Result struct {
+		Instruments []Symbol `json:"instruments"`
+	}
+	var result Result
+	if err = json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
-	return output, nil
+	return result.Instruments, nil
 }
 
 func (client *Client) Tickers() (*Tickers, error) {
