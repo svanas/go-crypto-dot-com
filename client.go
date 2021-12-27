@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -109,7 +110,7 @@ func params(symbol string, page, pageSize int) url.Values {
 	return output
 }
 
-func (client *Client) get(path string, params *url.Values) (json.RawMessage, error) {
+func (client *Client) get_v1(path string, params *url.Values) (json.RawMessage, error) {
 	var err error
 
 	// satisfy the rate limiter
@@ -172,7 +173,7 @@ func (client *Client) get(path string, params *url.Values) (json.RawMessage, err
 	return output.Data, nil
 }
 
-func (client *Client) get2(path string, params *url.Values) (json.RawMessage, error) {
+func (client *Client) get_v2(path string, params *url.Values) (json.RawMessage, error) {
 	var err error
 
 	// satisfy the rate limiter
@@ -279,8 +280,7 @@ func (client *Client) post(path string, params url.Values) ([]byte, error) {
 	params.Set("sign", hex.EncodeToString(hash.Sum(nil)))
 
 	// encode the url.Values into the request body
-	var input *strings.Reader
-	input = strings.NewReader(params.Encode())
+	input := strings.NewReader(params.Encode())
 
 	// create the request
 	var req *http.Request
@@ -336,7 +336,7 @@ func (client *Client) Symbols() ([]Symbol, error) {
 		err error
 		raw json.RawMessage
 	)
-	if raw, err = client.get2("/v2/public/get-instruments", nil); err != nil {
+	if raw, err = client.get_v2("/v2/public/get-instruments", nil); err != nil {
 		return nil, err
 	}
 	type Result struct {
@@ -354,7 +354,7 @@ func (client *Client) Tickers() (*Tickers, error) {
 		err  error
 		data json.RawMessage
 	)
-	if data, err = client.get("/v1/ticker", nil); err != nil {
+	if data, err = client.get_v1("/v1/ticker", nil); err != nil {
 		return nil, err
 	}
 	var output Tickers
@@ -371,7 +371,7 @@ func (client *Client) Ticker(symbol string) (*Ticker, error) {
 	)
 	params := url.Values{}
 	params.Add("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
-	if data, err = client.get("/v1/ticker", &params); err != nil {
+	if data, err = client.get_v1("/v1/ticker", &params); err != nil {
 		return nil, err
 	}
 	var output Ticker
@@ -388,7 +388,7 @@ func (client *Client) OrderBook(symbol string) (*OrderBook, error) {
 	)
 	params := url.Values{}
 	params.Add("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
-	if data, err = client.get("/v1/depth", &params); err != nil {
+	if data, err = client.get_v1("/v1/depth", &params); err != nil {
 		return nil, err
 	}
 	var output OrderBook
@@ -429,14 +429,23 @@ func (client *Client) CreateOrder(symbol string, side OrderSide, kind OrderType,
 	if data, err = client.post("/v1/order", params); err != nil {
 		return 0, err
 	}
-	type Output struct {
+	type Response struct {
 		OrderId int64 `json:"order_id,string"`
 	}
-	var output Output
-	if err = json.Unmarshal(data, &output); err != nil {
+	var (
+		resp  Response
+		order *Order
+	)
+	if err = json.Unmarshal(data, &resp); err != nil {
 		return 0, err
 	}
-	return output.OrderId, nil
+	if order, err = client.GetOrder(symbol, resp.OrderId); err != nil {
+		return resp.OrderId, err
+	}
+	if order.Status == ORDER_STATUS_EXPIRED {
+		return resp.OrderId, errors.New(order.StatusMsg)
+	}
+	return resp.OrderId, nil
 }
 
 func (client *Client) GetOrder(symbol string, orderId int64) (*Order, error) {
@@ -451,7 +460,7 @@ func (client *Client) GetOrder(symbol string, orderId int64) (*Order, error) {
 		return nil, err
 	}
 	type Output struct {
-		OrderInfo Order `json:"order_info"`
+		OrderInfo Order `json:"orderInfo"`
 	}
 	var output Output
 	if err = json.Unmarshal(data, &output); err != nil {
