@@ -28,8 +28,8 @@ const (
 )
 
 var RequestsPerSecond = map[rateLimit]float64{
-	RATE_LIMIT_NORMAL:    1,          // 1 req/second (default)
-	RATE_LIMIT_COOL_DOWN: 0.01666666, // 1 req/minute
+	RATE_LIMIT_NORMAL:    100,           // 100 req/second (default)
+	RATE_LIMIT_COOL_DOWN: 0.01666666667, // 1 req/minute
 }
 
 var (
@@ -37,24 +37,21 @@ var (
 	lastRequest time.Time
 )
 
-func getRequestsPerSecond() float64 {
-	if cooldown {
-		cooldown = false
-		return RequestsPerSecond[RATE_LIMIT_COOL_DOWN]
-	}
-	return RequestsPerSecond[RATE_LIMIT_NORMAL]
-}
-
 var (
-	BeforeRequest    func(method, path string, params *url.Values) error = nil
-	AfterRequest     func()                                              = nil
-	OnRateLimitError func(method, path string) error                     = nil
+	BeforeRequest    func(method, path string, params *url.Values, rps float64) error = nil
+	AfterRequest     func()                                                           = nil
+	OnRateLimitError func(method, path string) error                                  = nil
 )
 
 func init() {
-	BeforeRequest = func(method, path string, params *url.Values) error {
+	BeforeRequest = func(method, path string, params *url.Values, rps float64) error {
 		elapsed := time.Since(lastRequest)
-		rps := getRequestsPerSecond()
+		if cooldown {
+			cooldown = false
+			rps = RequestsPerSecond[RATE_LIMIT_COOL_DOWN]
+		} else if rps == 0 {
+			rps = RequestsPerSecond[RATE_LIMIT_NORMAL]
+		}
 		if elapsed.Seconds() < (float64(1) / rps) {
 			time.Sleep(time.Duration((float64(time.Second) / rps) - float64(elapsed)))
 		}
@@ -114,7 +111,7 @@ func (client *Client) get_v1(path string, params *url.Values) (json.RawMessage, 
 	var err error
 
 	// satisfy the rate limiter
-	if err = BeforeRequest("GET", path, params); err != nil {
+	if err = BeforeRequest("GET", path, params, RequestsPerSecond[RATE_LIMIT_NORMAL]); err != nil {
 		return nil, err
 	}
 	defer func() {
@@ -177,7 +174,7 @@ func (client *Client) get_v2(path string, params *url.Values) (json.RawMessage, 
 	var err error
 
 	// satisfy the rate limiter
-	if err = BeforeRequest("GET", path, params); err != nil {
+	if err = BeforeRequest("GET", path, params, RequestsPerSecond[RATE_LIMIT_NORMAL]); err != nil {
 		return nil, err
 	}
 	defer func() {
@@ -236,11 +233,11 @@ func (client *Client) get_v2(path string, params *url.Values) (json.RawMessage, 
 	return output.Result, nil
 }
 
-func (client *Client) post(path string, params url.Values) ([]byte, error) {
+func (client *Client) post(path string, params url.Values, rps float64) ([]byte, error) {
 	var err error
 
 	// satisfy the rate limiter
-	if err = BeforeRequest("POST", path, &params); err != nil {
+	if err = BeforeRequest("POST", path, &params, rps); err != nil {
 		return nil, err
 	}
 	defer func() {
@@ -403,7 +400,7 @@ func (client *Client) Account() (*Account, error) {
 		err  error
 		data json.RawMessage
 	)
-	if data, err = client.post("/v1/account", url.Values{}); err != nil {
+	if data, err = client.post("/v1/account", url.Values{}, 1); err != nil {
 		return nil, err
 	}
 	var output Account
@@ -426,7 +423,7 @@ func (client *Client) CreateOrder(symbol string, side OrderSide, kind OrderType,
 	if kind != MARKET {
 		params.Add("price", strconv.FormatFloat(price, 'f', -1, 64))
 	}
-	if data, err = client.post("/v1/order", params); err != nil {
+	if data, err = client.post("/v1/order", params, 5); err != nil {
 		return 0, err
 	}
 	type Response struct {
@@ -456,7 +453,7 @@ func (client *Client) GetOrder(symbol string, orderId int64) (*Order, error) {
 	params := url.Values{}
 	params.Set("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
 	params.Set("order_id", strconv.FormatInt(orderId, 10))
-	if data, err = client.post("/v1/showOrder", params); err != nil {
+	if data, err = client.post("/v1/showOrder", params, 10); err != nil {
 		return nil, err
 	}
 	type Output struct {
@@ -473,7 +470,7 @@ func (client *Client) CancelOrder(symbol string, orderId int64) error {
 	params := url.Values{}
 	params.Set("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
 	params.Set("order_id", strconv.FormatInt(orderId, 10))
-	if _, err := client.post("/v1/orders/cancel", params); err != nil {
+	if _, err := client.post("/v1/orders/cancel", params, 5); err != nil {
 		return err
 	}
 	return nil
@@ -485,7 +482,7 @@ func (client *Client) OpenOrders(symbol string) ([]Order, error) {
 			err  error
 			data json.RawMessage
 		)
-		if data, err = client.post("/v1/openOrders", params); err != nil {
+		if data, err = client.post("/v1/openOrders", params, 1); err != nil {
 			return 0, nil, err
 		}
 		type Output struct {
@@ -528,7 +525,7 @@ func (client *Client) MyTrades(symbol string) ([]Trade, error) {
 			err  error
 			data json.RawMessage
 		)
-		if data, err = client.post("/v1/myTrades", params); err != nil {
+		if data, err = client.post("/v1/myTrades", params, 1); err != nil {
 			return 0, nil, err
 		}
 		type Output struct {
