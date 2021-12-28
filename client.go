@@ -118,6 +118,7 @@ func (client *Client) get_v1(path string, params *url.Values) (json.RawMessage, 
 		AfterRequest()
 	}()
 
+	// parse the root URL
 	var endpoint *url.URL
 	if endpoint, err = url.Parse(client.URL); err != nil {
 		return nil, err
@@ -135,17 +136,17 @@ func (client *Client) get_v1(path string, params *url.Values) (json.RawMessage, 
 	}
 	defer resp.Body.Close()
 
-	// read the body of the response into a byte array
-	var body []byte
-	if body, err = ioutil.ReadAll(resp.Body); err != nil {
-		return nil, err
-	}
-
 	// are we exceeding the rate limits?
 	if resp.StatusCode == http.StatusTooManyRequests {
 		if err = OnRateLimitError("GET", path); err != nil {
 			return nil, err
 		}
+	}
+
+	// read the body of the response into a byte array
+	var body []byte
+	if body, err = ioutil.ReadAll(resp.Body); err != nil {
+		return nil, err
 	}
 
 	// is this an error?
@@ -159,7 +160,13 @@ func (client *Client) get_v1(path string, params *url.Values) (json.RawMessage, 
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s %s", resp.Status, path)
+		return nil, func() error {
+			if params == nil {
+				return fmt.Errorf("GET %s %s", resp.Status, path)
+			} else {
+				return fmt.Errorf("GET %s %s?%s", resp.Status, path, params.Encode())
+			}
+		}()
 	}
 
 	var output Response1
@@ -181,6 +188,7 @@ func (client *Client) get_v2(path string, params *url.Values) (json.RawMessage, 
 		AfterRequest()
 	}()
 
+	// parse the root URL
 	var endpoint *url.URL
 	if endpoint, err = url.Parse(client.URL); err != nil {
 		return nil, err
@@ -198,12 +206,6 @@ func (client *Client) get_v2(path string, params *url.Values) (json.RawMessage, 
 	}
 	defer resp.Body.Close()
 
-	// read the body of the response into a byte array
-	var body []byte
-	if body, err = ioutil.ReadAll(resp.Body); err != nil {
-		return nil, err
-	}
-
 	// are we exceeding the rate limits?
 	if resp.StatusCode == http.StatusTooManyRequests {
 		if err = OnRateLimitError("GET", path); err != nil {
@@ -211,18 +213,36 @@ func (client *Client) get_v2(path string, params *url.Values) (json.RawMessage, 
 		}
 	}
 
+	// read the body of the response into a byte array
+	var body []byte
+	if body, err = ioutil.ReadAll(resp.Body); err != nil {
+		return nil, err
+	}
+
 	// is this an error?
 	status := make(map[string]interface{})
 	if json.Unmarshal(body, &status) == nil {
 		if code, ok := status["code"]; ok {
 			if code != float64(0) {
-				return nil, fmt.Errorf("GET error code %v %s", code, path)
+				return nil, func() error {
+					if params == nil {
+						return fmt.Errorf("GET %v %s", code, path)
+					} else {
+						return fmt.Errorf("GET %v %s?%s", code, path, params.Encode())
+					}
+				}()
 			}
 		}
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("GET %s %s", resp.Status, path)
+		return nil, func() error {
+			if params == nil {
+				return fmt.Errorf("GET %s %s", resp.Status, path)
+			} else {
+				return fmt.Errorf("GET %s %s?%s", resp.Status, path, params.Encode())
+			}
+		}()
 	}
 
 	var output Response2
@@ -234,98 +254,119 @@ func (client *Client) get_v2(path string, params *url.Values) (json.RawMessage, 
 }
 
 func (client *Client) post(path string, params url.Values, rps float64) ([]byte, error) {
-	var err error
-
-	// satisfy the rate limiter
-	if err = BeforeRequest("POST", path, &params, rps); err != nil {
+	// create the endpoint for this request
+	endpoint, err := url.Parse(client.URL)
+	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		AfterRequest()
-	}()
-
-	var endpoint *url.URL
-	if endpoint, err = url.Parse(client.URL); err != nil {
-		return nil, err
-	}
-
-	// set the endpoint for this request
 	endpoint.Path += path
 
-	// add API key & time to params
-	params.Set("api_key", client.Key)
-	time := time.Now().UnixNano() / int64(time.Millisecond/time.Nanosecond)
-	params.Set("time", strconv.FormatInt(time, 10))
-
-	// add signature to params
-	keys := make([]string, 0, len(params))
-	for key := range params {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	var buf strings.Builder
-	for _, key := range keys {
-		value := params.Get(key)
-		if value != "" {
-			buf.WriteString(key)
-			buf.WriteString(value)
-		}
-	}
-	buf.WriteString(client.Secret)
-	hash := sha256.New()
-	hash.Write([]byte(buf.String()))
-	params.Set("sign", hex.EncodeToString(hash.Sum(nil)))
-
-	// encode the url.Values into the request body
-	input := strings.NewReader(params.Encode())
-
-	// create the request
-	var req *http.Request
-	if req, err = http.NewRequest("POST", endpoint.String(), input); err != nil {
-		return nil, err
-	}
-	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-
-	// submit the http request
-	var resp *http.Response
-	if resp, err = client.httpClient.Do(req); err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	// read the body of the response into a byte array
-	var body []byte
-	if body, err = ioutil.ReadAll(resp.Body); err != nil {
-		return nil, err
-	}
-
-	// are we exceeding the rate limits?
-	if resp.StatusCode == http.StatusTooManyRequests {
-		if err = OnRateLimitError("POST", path); err != nil {
-			return nil, err
-		}
-	}
-
-	// is this an error?
-	status := make(map[string]interface{})
-	if json.Unmarshal(body, &status) == nil {
-		if msg, ok := status["msg"]; ok {
-			if msg != "suc" {
-				return nil, fmt.Errorf("%v", msg)
+	var (
+		code int
+		data []byte
+	)
+	for {
+		code, data, err = func(params url.Values) (int, []byte, error) {
+			// satisfy the rate limiter
+			if err = BeforeRequest("POST", path, &params, rps); err != nil {
+				return 0, nil, err
 			}
+			defer func() {
+				AfterRequest()
+			}()
+
+			// add API key & time to params
+			params.Set("api_key", client.Key)
+			time := time.Now().UnixNano() / int64(time.Millisecond/time.Nanosecond)
+			params.Set("time", strconv.FormatInt(time, 10))
+
+			// add signature to params
+			keys := make([]string, 0, len(params))
+			for key := range params {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			var buf strings.Builder
+			for _, key := range keys {
+				value := params.Get(key)
+				if value != "" {
+					buf.WriteString(key)
+					buf.WriteString(value)
+				}
+			}
+			buf.WriteString(client.Secret)
+			hash := sha256.New()
+			hash.Write([]byte(buf.String()))
+			params.Set("sign", hex.EncodeToString(hash.Sum(nil)))
+
+			// create the request
+			var req *http.Request
+			if req, err = http.NewRequest("POST", endpoint.String(), strings.NewReader(params.Encode())); err != nil {
+				return 0, nil, err
+			}
+			req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+
+			// submit the http request
+			var resp *http.Response
+			if resp, err = client.httpClient.Do(req); err != nil {
+				return 0, nil, err
+			}
+			defer resp.Body.Close()
+
+			// are we exceeding the rate limits?
+			if resp.StatusCode == http.StatusTooManyRequests {
+				if err = OnRateLimitError("POST", path); err != nil {
+					return resp.StatusCode, nil, err
+				}
+			}
+
+			// read the body of the response into a byte array
+			var body []byte
+			if body, err = ioutil.ReadAll(resp.Body); err != nil {
+				return resp.StatusCode, nil, err
+			}
+
+			// is this an error?
+			status := make(map[string]interface{})
+			if json.Unmarshal(body, &status) == nil {
+				if msg, ok := status["msg"]; ok {
+					if msg != "suc" {
+						return resp.StatusCode, nil, fmt.Errorf("%v", msg)
+					}
+				}
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				return resp.StatusCode, nil, func() error {
+					if len(params) == 0 {
+						return fmt.Errorf("POST %s %s", resp.Status, path)
+					} else {
+						return fmt.Errorf("POST %s %s?%s", resp.Status, path, params.Encode())
+					}
+				}()
+			}
+
+			// unmarshal the response body
+			var result Response1
+			if err = json.Unmarshal(body, &result); err != nil {
+				return resp.StatusCode, nil, err
+			}
+
+			return resp.StatusCode, result.Data, nil
+		}(func() url.Values {
+			copied := url.Values{}
+			for key, value := range params {
+				copied[key] = value
+			}
+			return copied
+		}())
+
+		if code != http.StatusTooManyRequests {
+			break
 		}
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("POST %s %s", resp.Status, path)
-	}
-
-	var output Response1
-	if err = json.Unmarshal(body, &output); err != nil {
-		return nil, err
-	}
-
-	return output.Data, nil
+	return data, err
 }
 
 func (client *Client) Symbols() ([]Symbol, error) {
