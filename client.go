@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -481,7 +480,32 @@ func (client *Client) CreateOrder(symbol string, side OrderSide, kind OrderType,
 		return resp.OrderId, err
 	}
 	if order.Status == ORDER_STATUS_EXPIRED {
-		return resp.OrderId, errors.New(order.StatusMsg)
+		//lint:ignore ST1005 error strings should not be capitalized
+		return resp.OrderId, fmt.Errorf("Cannot %s %s unit(s) of %s at %s %s. Your available balance is %s %s.", func() string {
+			if side == SELL {
+				return "sell"
+			} else {
+				return "buy"
+			}
+		}(), strconv.FormatFloat(quantity, 'f', -1, 64), order.BaseCoin, order.CountCoin, strconv.FormatFloat(func() float64 {
+			if kind == MARKET {
+				ticker, err := client.Ticker(symbol)
+				if err == nil {
+					return ticker.Last
+				}
+			}
+			return price
+		}(), 'f', -1, 64), order.CountCoin, strconv.FormatFloat(func() float64 {
+			account, err := client.Account()
+			if err == nil {
+				for _, coin := range account.CoinList {
+					if strings.EqualFold(coin.Coin, order.CountCoin) {
+						return coin.Normal
+					}
+				}
+			}
+			return 0
+		}(), 'f', -1, 64))
 	}
 	return resp.OrderId, nil
 }
