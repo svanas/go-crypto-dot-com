@@ -223,11 +223,20 @@ func (client *Client) get_v2(path string, params *url.Values) (json.RawMessage, 
 	if json.Unmarshal(body, &status) == nil {
 		if code, ok := status["code"]; ok {
 			if code != float64(0) {
+				msg := func() string {
+					if det, ok := status["details"]; ok {
+						return fmt.Sprintf("%v", det)
+					} else if msg, ok := status["message"]; ok {
+						return fmt.Sprintf("%v", msg)
+					} else {
+						return fmt.Sprintf("%v", code)
+					}
+				}()
 				return nil, func() error {
 					if params == nil {
-						return fmt.Errorf("GET %v %s", code, path)
+						return fmt.Errorf("GET %s %s", msg, path)
 					} else {
-						return fmt.Errorf("GET %v %s?%s", code, path, params.Encode())
+						return fmt.Errorf("GET %s %s?%s", msg, path, params.Encode())
 					}
 				}()
 			}
