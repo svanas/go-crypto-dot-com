@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -14,10 +15,7 @@ import (
 	"time"
 )
 
-const (
-	pageSize = 50
-	endpoint = "https://api.crypto.com"
-)
+const endpoint = "https://api.crypto.com/v2/"
 
 type rateLimit int
 
@@ -37,13 +35,13 @@ var (
 )
 
 var (
-	BeforeRequest    func(method, path string, params *url.Values, rps float64) error = nil
-	AfterRequest     func()                                                           = nil
-	OnRateLimitError func(method, path string) error                                  = nil
+	BeforeRequest    func(method, path string, rps float64) error = nil
+	AfterRequest     func()                                       = nil
+	OnRateLimitError func(method, path string) error              = nil
 )
 
 func init() {
-	BeforeRequest = func(method, path string, params *url.Values, rps float64) error {
+	BeforeRequest = func(method, path string, rps float64) error {
 		elapsed := time.Since(lastRequest)
 		if cooldown {
 			cooldown = false
@@ -83,185 +81,127 @@ func New(apiKey, apiSecret string) *Client {
 	}
 }
 
-type Response1 struct {
-	Code interface{}     `json:"code"`
-	Msg  string          `json:"msg"`
-	Data json.RawMessage `json:"data"`
+type Request struct {
+	Id     int                    `json:"id"`
+	Method string                 `json:"method"`
+	ApiKey string                 `json:"api_key"`
+	Params map[string]interface{} `json:"params"`
+	Sig    string                 `json:"sig"`
+	Nonce  int64                  `json:"nonce"`
 }
 
-type Response2 struct {
+type Response struct {
 	Code   interface{}     `json:"code"`
 	Result json.RawMessage `json:"result"`
 }
 
-func params(symbol string, page, pageSize int) url.Values {
-	output := url.Values{}
-	output.Set("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
-	if page > 0 {
-		output.Set("page", strconv.Itoa(page))
+func (client *Client) get(path string, params *url.Values) (json.RawMessage, error) {
+	// parse the root URL
+	endpoint, err := url.Parse(client.URL)
+	if err != nil {
+		return nil, err
 	}
-	if pageSize > 0 {
-		output.Set("pageSize", strconv.Itoa(pageSize))
+
+	// set the endpoint for this request
+	endpoint.Path += path
+	if params != nil {
+		endpoint.RawQuery = params.Encode()
+	}
+
+	var data []byte
+	for {
+		var code int
+		code, data, err = func() (int, []byte, error) {
+			// satisfy the rate limiter
+			if err := BeforeRequest("GET", path, RequestsPerSecond[RATE_LIMIT_NORMAL]); err != nil {
+				return 0, nil, err
+			}
+			defer func() {
+				AfterRequest()
+			}()
+
+			response, err := client.httpClient.Get(endpoint.String())
+			if err != nil {
+				return 0, nil, err
+			}
+			defer response.Body.Close()
+
+			// are we exceeding the rate limits?
+			if response.StatusCode == http.StatusTooManyRequests {
+				if err := OnRateLimitError("GET", path); err != nil {
+					return response.StatusCode, nil, err
+				}
+			}
+
+			// read the body of the response into a byte array
+			body, err := ioutil.ReadAll(response.Body)
+			if err != nil {
+				return response.StatusCode, nil, err
+			}
+
+			// is this an error?
+			status := make(map[string]interface{})
+			if json.Unmarshal(body, &status) == nil {
+				if code, ok := status["code"]; ok {
+					if code != float64(0) {
+						msg := func() string {
+							if det, ok := status["details"]; ok {
+								return fmt.Sprintf("%v", det)
+							} else if msg, ok := status["message"]; ok {
+								return fmt.Sprintf("%v", msg)
+							} else {
+								return fmt.Sprintf("%v", code)
+							}
+						}()
+						return response.StatusCode, nil, func() error {
+							if params == nil {
+								return fmt.Errorf("GET %s %s", path, msg)
+							} else {
+								return fmt.Errorf("GET %s?%s %s", path, params.Encode(), msg)
+							}
+						}()
+					}
+				}
+			}
+
+			if response.StatusCode < 200 || response.StatusCode >= 300 {
+				return response.StatusCode, nil, func() error {
+					if params == nil {
+						return fmt.Errorf("GET %s %s", path, response.Status)
+					} else {
+						return fmt.Errorf("GET %s?%s %s", path, params.Encode(), response.Status)
+					}
+				}()
+			}
+
+			var output Response
+			if err := json.Unmarshal(body, &output); err != nil {
+				return response.StatusCode, nil, err
+			}
+
+			return response.StatusCode, output.Result, nil
+		}()
+
+		if code != http.StatusTooManyRequests {
+			break
+		}
+	}
+
+	return data, err
+}
+
+func params(symbol string, page int) map[string]interface{} {
+	output := make(map[string]interface{})
+	if symbol != "" {
+		output["instrument_name"] = symbol
+	}
+	if page > 0 {
+		output["page"] = page
 	}
 	return output
 }
 
-func (client *Client) get_v1(path string, params *url.Values) (json.RawMessage, error) {
-	var err error
-
-	// satisfy the rate limiter
-	if err = BeforeRequest("GET", path, params, RequestsPerSecond[RATE_LIMIT_NORMAL]); err != nil {
-		return nil, err
-	}
-	defer func() {
-		AfterRequest()
-	}()
-
-	// parse the root URL
-	var endpoint *url.URL
-	if endpoint, err = url.Parse(client.URL); err != nil {
-		return nil, err
-	}
-
-	// set the endpoint for this request
-	endpoint.Path += path
-	if params != nil {
-		endpoint.RawQuery = params.Encode()
-	}
-
-	var resp *http.Response
-	if resp, err = client.httpClient.Get(endpoint.String()); err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	// are we exceeding the rate limits?
-	if resp.StatusCode == http.StatusTooManyRequests {
-		if err = OnRateLimitError("GET", path); err != nil {
-			return nil, err
-		}
-	}
-
-	// read the body of the response into a byte array
-	var body []byte
-	if body, err = ioutil.ReadAll(resp.Body); err != nil {
-		return nil, err
-	}
-
-	// is this an error?
-	status := make(map[string]interface{})
-	if json.Unmarshal(body, &status) == nil {
-		if msg, ok := status["msg"]; ok {
-			if msg != "suc" {
-				return nil, fmt.Errorf("%v", msg)
-			}
-		}
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, func() error {
-			if params == nil {
-				return fmt.Errorf("GET %s %s", resp.Status, path)
-			} else {
-				return fmt.Errorf("GET %s %s?%s", resp.Status, path, params.Encode())
-			}
-		}()
-	}
-
-	var output Response1
-	if err = json.Unmarshal(body, &output); err != nil {
-		return nil, err
-	}
-
-	return output.Data, nil
-}
-
-func (client *Client) get_v2(path string, params *url.Values) (json.RawMessage, error) {
-	var err error
-
-	// satisfy the rate limiter
-	if err = BeforeRequest("GET", path, params, RequestsPerSecond[RATE_LIMIT_NORMAL]); err != nil {
-		return nil, err
-	}
-	defer func() {
-		AfterRequest()
-	}()
-
-	// parse the root URL
-	var endpoint *url.URL
-	if endpoint, err = url.Parse(client.URL); err != nil {
-		return nil, err
-	}
-
-	// set the endpoint for this request
-	endpoint.Path += path
-	if params != nil {
-		endpoint.RawQuery = params.Encode()
-	}
-
-	var resp *http.Response
-	if resp, err = client.httpClient.Get(endpoint.String()); err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	// are we exceeding the rate limits?
-	if resp.StatusCode == http.StatusTooManyRequests {
-		if err = OnRateLimitError("GET", path); err != nil {
-			return nil, err
-		}
-	}
-
-	// read the body of the response into a byte array
-	var body []byte
-	if body, err = ioutil.ReadAll(resp.Body); err != nil {
-		return nil, err
-	}
-
-	// is this an error?
-	status := make(map[string]interface{})
-	if json.Unmarshal(body, &status) == nil {
-		if code, ok := status["code"]; ok {
-			if code != float64(0) {
-				msg := func() string {
-					if det, ok := status["details"]; ok {
-						return fmt.Sprintf("%v", det)
-					} else if msg, ok := status["message"]; ok {
-						return fmt.Sprintf("%v", msg)
-					} else {
-						return fmt.Sprintf("%v", code)
-					}
-				}()
-				return nil, func() error {
-					if params == nil {
-						return fmt.Errorf("GET %s %s", msg, path)
-					} else {
-						return fmt.Errorf("GET %s %s?%s", msg, path, params.Encode())
-					}
-				}()
-			}
-		}
-	}
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, func() error {
-			if params == nil {
-				return fmt.Errorf("GET %s %s", resp.Status, path)
-			} else {
-				return fmt.Errorf("GET %s %s?%s", resp.Status, path, params.Encode())
-			}
-		}()
-	}
-
-	var output Response2
-	if err = json.Unmarshal(body, &output); err != nil {
-		return nil, err
-	}
-
-	return output.Result, nil
-}
-
-func (client *Client) post(path string, params url.Values, rps float64) ([]byte, error) {
+func (client *Client) post(path string, params map[string]interface{}, rps float64) ([]byte, error) {
 	// create the endpoint for this request
 	endpoint, err := url.Parse(client.URL)
 	if err != nil {
@@ -269,105 +209,122 @@ func (client *Client) post(path string, params url.Values, rps float64) ([]byte,
 	}
 	endpoint.Path += path
 
-	var (
-		code int
-		data []byte
-	)
+	var data []byte
 	for {
-		code, data, err = func(params url.Values) (int, []byte, error) {
+		var code int
+		code, data, err = func() (int, []byte, error) {
 			// satisfy the rate limiter
-			if err = BeforeRequest("POST", path, &params, rps); err != nil {
+			if err := BeforeRequest("POST", path, rps); err != nil {
 				return 0, nil, err
 			}
 			defer func() {
 				AfterRequest()
 			}()
 
-			// add API key & time to params
-			params.Set("api_key", client.Key)
-			time := time.Now().UnixNano() / int64(time.Millisecond/time.Nanosecond)
-			params.Set("time", strconv.FormatInt(time, 10))
+			nonce := time.Now().UnixNano() / int64(time.Millisecond/time.Nanosecond)
 
-			// add signature to params
+			// generate signature
+			var sig strings.Builder
+			sig.WriteString(path)       // method
+			sig.WriteString("0")        // id
+			sig.WriteString(client.Key) // api_key
 			keys := make([]string, 0, len(params))
 			for key := range params {
 				keys = append(keys, key)
 			}
 			sort.Strings(keys)
-			var buf strings.Builder
 			for _, key := range keys {
-				value := params.Get(key)
-				if value != "" {
-					buf.WriteString(key)
-					buf.WriteString(value)
+				value := params[key]
+				if value != nil {
+					sig.WriteString(key)
+					sig.WriteString(func(v interface{}) string {
+						if i, ok := v.(int); ok {
+							return strconv.Itoa(i)
+						}
+						if i64, ok := v.(int64); ok {
+							return strconv.FormatInt(i64, 10)
+						}
+						if f64, ok := v.(float64); ok {
+							return strconv.FormatFloat(f64, 'f', -1, 64)
+						}
+						return fmt.Sprintf("%v", v)
+					}(value))
 				}
 			}
-			buf.WriteString(client.Secret)
-			hash := sha256.New()
-			hash.Write([]byte(buf.String()))
-			params.Set("sign", hex.EncodeToString(hash.Sum(nil)))
+			sig.WriteString(strconv.FormatInt(nonce, 10))
+			mac := hmac.New(sha256.New, []byte(client.Secret))
+			mac.Write([]byte(sig.String()))
+
+			payload, err := json.Marshal(Request{
+				Id:     0,
+				Method: path,
+				ApiKey: client.Key,
+				Params: params,
+				Sig:    hex.EncodeToString(mac.Sum(nil)),
+				Nonce:  nonce,
+			})
+			if err != nil {
+				return 0, nil, err
+			}
 
 			// create the request
-			var req *http.Request
-			if req, err = http.NewRequest("POST", endpoint.String(), strings.NewReader(params.Encode())); err != nil {
+			request, err := http.NewRequest("POST", endpoint.String(), strings.NewReader(string(payload)))
+			if err != nil {
 				return 0, nil, err
 			}
-			req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+			request.Header.Add("Content-Type", "application/json")
 
 			// submit the http request
-			var resp *http.Response
-			if resp, err = client.httpClient.Do(req); err != nil {
+			response, err := client.httpClient.Do(request)
+			if err != nil {
 				return 0, nil, err
 			}
-			defer resp.Body.Close()
+			defer response.Body.Close()
 
 			// are we exceeding the rate limits?
-			if resp.StatusCode == http.StatusTooManyRequests {
+			if response.StatusCode == http.StatusTooManyRequests {
 				if err = OnRateLimitError("POST", path); err != nil {
-					return resp.StatusCode, nil, err
+					return response.StatusCode, nil, err
 				}
 			}
 
 			// read the body of the response into a byte array
-			var body []byte
-			if body, err = ioutil.ReadAll(resp.Body); err != nil {
-				return resp.StatusCode, nil, err
+			body, err := ioutil.ReadAll(response.Body)
+			if err != nil {
+				return response.StatusCode, nil, err
 			}
 
 			// is this an error?
 			status := make(map[string]interface{})
 			if json.Unmarshal(body, &status) == nil {
-				if msg, ok := status["msg"]; ok {
-					if msg != "suc" {
-						return resp.StatusCode, nil, fmt.Errorf("%v", msg)
+				if code, ok := status["code"]; ok {
+					if code != float64(0) {
+						msg := func() string {
+							if det, ok := status["details"]; ok {
+								return fmt.Sprintf("%v", det)
+							} else if msg, ok := status["message"]; ok {
+								return fmt.Sprintf("%v", msg)
+							} else {
+								return fmt.Sprintf("%v", code)
+							}
+						}()
+						return response.StatusCode, nil, fmt.Errorf("POST %s %s", path, msg)
 					}
 				}
 			}
 
-			if resp.StatusCode != http.StatusOK {
-				return resp.StatusCode, nil, func() error {
-					if len(params) == 0 {
-						return fmt.Errorf("POST %s %s", resp.Status, path)
-					} else {
-						return fmt.Errorf("POST %s %s?%s", resp.Status, path, params.Encode())
-					}
-				}()
+			if response.StatusCode < 200 || response.StatusCode >= 300 {
+				return response.StatusCode, nil, fmt.Errorf("POST %s %s", path, response.Status)
 			}
 
 			// unmarshal the response body
-			var result Response1
-			if err = json.Unmarshal(body, &result); err != nil {
-				return resp.StatusCode, nil, err
+			var output Response
+			if err = json.Unmarshal(body, &output); err != nil {
+				return response.StatusCode, nil, err
 			}
 
-			return resp.StatusCode, result.Data, nil
-		}(func() url.Values {
-			copied := url.Values{}
-			for key, value := range params {
-				copied[key] = value
-			}
-			return copied
-		}())
+			return response.StatusCode, output.Result, nil
+		}()
 
 		if code != http.StatusTooManyRequests {
 			break
@@ -378,196 +335,214 @@ func (client *Client) post(path string, params url.Values, rps float64) ([]byte,
 }
 
 func (client *Client) Symbols() ([]Symbol, error) {
-	var (
-		err error
-		raw json.RawMessage
-	)
-	if raw, err = client.get_v2("/v2/public/get-instruments", nil); err != nil {
+	raw, err := client.get("public/get-instruments", nil)
+	if err != nil {
 		return nil, err
 	}
 	type Result struct {
 		Instruments []Symbol `json:"instruments"`
 	}
 	var result Result
-	if err = json.Unmarshal(raw, &result); err != nil {
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
 	return result.Instruments, nil
 }
 
-func (client *Client) Tickers() (*Tickers, error) {
-	var (
-		err  error
-		data json.RawMessage
-	)
-	if data, err = client.get_v1("/v1/ticker", nil); err != nil {
+func (client *Client) Tickers() ([]Ticker, error) {
+	raw, err := client.get("public/get-ticker", nil)
+	if err != nil {
 		return nil, err
 	}
-	var output Tickers
-	if err = json.Unmarshal(data, &output); err != nil {
+	type Result struct {
+		Data []Ticker `json:"data"`
+	}
+	var result Result
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
-	return &output, nil
+	return result.Data, nil
 }
 
 func (client *Client) Ticker(symbol string) (*Ticker, error) {
-	var (
-		err  error
-		data json.RawMessage
-	)
 	params := url.Values{}
-	params.Add("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
-	if data, err = client.get_v1("/v1/ticker", &params); err != nil {
+	params.Add("instrument_name", symbol)
+	raw, err := client.get("public/get-ticker", &params)
+	if err != nil {
 		return nil, err
 	}
-	var output Ticker
-	if err = json.Unmarshal(data, &output); err != nil {
+	type Result struct {
+		Data []Ticker `json:"data"`
+	}
+	var result Result
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
-	return &output, nil
+	if len(result.Data) == 0 {
+		return nil, fmt.Errorf("%s does not exist", symbol)
+	}
+	return &result.Data[0], nil
 }
 
 func (client *Client) OrderBook(symbol string) (*OrderBook, error) {
-	var (
-		err  error
-		data json.RawMessage
-	)
 	params := url.Values{}
-	params.Add("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
-	if data, err = client.get_v1("/v1/depth", &params); err != nil {
+	params.Add("instrument_name", symbol)
+	raw, err := client.get("public/get-book", &params)
+	if err != nil {
 		return nil, err
 	}
-	var output OrderBook
-	if err = json.Unmarshal(data, &output); err != nil {
+	type Result struct {
+		Data []OrderBook `json:"data"`
+	}
+	var result Result
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
-	return &output, nil
+	if len(result.Data) == 0 {
+		return nil, fmt.Errorf("%s does not exist", symbol)
+	}
+	return &result.Data[0], nil
 }
 
-func (client *Client) Account() (*Account, error) {
-	var (
-		err  error
-		data json.RawMessage
-	)
-	if data, err = client.post("/v1/account", url.Values{}, 1); err != nil {
+func (client *Client) Accounts() ([]Account, error) {
+	raw, err := client.post("private/get-account-summary", nil, 30)
+	if err != nil {
 		return nil, err
 	}
-	var output Account
-	if err = json.Unmarshal(data, &output); err != nil {
+	type Result struct {
+		Accounts []Account `json:"accounts"`
+	}
+	var result Result
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
-	return &output, nil
+	return result.Accounts, nil
 }
 
-func (client *Client) CreateOrder(symbol string, side OrderSide, kind OrderType, quantity, price float64) (int64, error) {
-	var (
-		err  error
-		data json.RawMessage
-	)
-	params := url.Values{}
-	params.Set("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
-	params.Set("side", side.String())
-	params.Set("type", kind.String())
-	params.Set("volume", strconv.FormatFloat(quantity, 'f', -1, 64))
-	if kind != MARKET {
-		params.Add("price", strconv.FormatFloat(price, 'f', -1, 64))
+func (client *Client) Account(asset string) (*Account, error) {
+	params := make(map[string]interface{})
+	params["currency"] = asset
+	raw, err := client.post("private/get-account-summary", params, 30)
+	if err != nil {
+		return nil, err
 	}
-	if data, err = client.post("/v1/order", params, 5); err != nil {
-		return 0, err
+	type Result struct {
+		Accounts []Account `json:"accounts"`
 	}
-	type Response struct {
-		OrderId int64 `json:"order_id,string"`
+	var result Result
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
 	}
-	var (
-		resp  Response
-		order *Order
-	)
-	if err = json.Unmarshal(data, &resp); err != nil {
-		return 0, err
+	if len(result.Accounts) == 0 {
+		return nil, fmt.Errorf("%s does not exist", asset)
 	}
-	if order, err = client.GetOrder(symbol, resp.OrderId); err != nil {
-		return resp.OrderId, err
+	return &result.Accounts[0], nil
+}
+
+func (client *Client) CreateOrder(symbol string, side OrderSide, kind OrderType, quantity, price float64) (*string, error) { // -> (order_id, error)
+	params := make(map[string]interface{})
+	params["instrument_name"] = symbol
+	params["side"] = side
+	params["type"] = kind
+	params["quantity"] = quantity
+	if kind == LIMIT || kind == STOP_LIMIT {
+		params["price"] = price
+	}
+	raw, err := client.post("private/create-order", params, 150)
+	if err != nil {
+		return nil, err
+	}
+	type Result struct {
+		OrderId string `json:"order_id"`
+	}
+	var result Result
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, err
+	}
+	order, err := client.GetOrder(symbol, result.OrderId)
+	if err != nil {
+		return &result.OrderId, err
+	}
+	if order.Status == ORDER_STATUS_REJECTED {
+		return &result.OrderId, fmt.Errorf("order rejected. reason: %v", order.Reason)
 	}
 	if order.Status == ORDER_STATUS_EXPIRED {
-		//lint:ignore ST1005 error strings should not be capitalized
-		return resp.OrderId, fmt.Errorf("Cannot %s %s unit(s) of %s at %s %s. Your available balance is %s %s.", func() string {
-			if side == SELL {
-				return "sell"
-			} else {
-				return "buy"
-			}
-		}(), strconv.FormatFloat(quantity, 'f', -1, 64), order.BaseCoin, order.CountCoin, strconv.FormatFloat(func() float64 {
-			if kind == MARKET {
-				ticker, err := client.Ticker(symbol)
-				if err == nil {
-					return ticker.Last
-				}
-			}
-			return price
-		}(), 'f', -1, 64), order.CountCoin, strconv.FormatFloat(func() float64 {
-			account, err := client.Account()
-			if err == nil {
-				for _, coin := range account.CoinList {
-					if strings.EqualFold(coin.Coin, order.CountCoin) {
-						return coin.Normal
+		var (
+			base  = strings.Split(symbol, "/")[0]
+			quote = strings.Split(symbol, "/")[1]
+		)
+		return &result.OrderId, fmt.Errorf("cannot %v %s unit(s) of %s at %s %s. your available balance is %s %s",
+			side, strconv.FormatFloat(quantity, 'f', -1, 64), base, quote,
+			strconv.FormatFloat(func() float64 {
+				if kind == MARKET {
+					ticker, err := client.Ticker(symbol)
+					if err == nil {
+						return ticker.Last
 					}
 				}
-			}
-			return 0
-		}(), 'f', -1, 64))
+				return price
+			}(), 'f', -1, 64), func() string {
+				if side == SELL {
+					return base
+				}
+				return quote
+			}(), strconv.FormatFloat(func() float64 {
+				account, err := client.Account(func() string {
+					if side == SELL {
+						return base
+					}
+					return quote
+				}())
+				if err == nil {
+					return account.Available
+				}
+				return 0
+			}(), 'f', -1, 64))
 	}
-	return resp.OrderId, nil
+	return &result.OrderId, nil
 }
 
-func (client *Client) GetOrder(symbol string, orderId int64) (*Order, error) {
-	var (
-		err  error
-		data json.RawMessage
-	)
-	params := url.Values{}
-	params.Set("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
-	params.Set("order_id", strconv.FormatInt(orderId, 10))
-	if data, err = client.post("/v1/showOrder", params, 10); err != nil {
+func (client *Client) GetOrder(symbol, orderId string) (*Order, error) {
+	params := make(map[string]interface{})
+	params["instrument_name"] = symbol
+	params["order_id"] = orderId
+	raw, err := client.post("private/get-order-detail", params, 300)
+	if err != nil {
 		return nil, err
 	}
-	type Output struct {
-		OrderInfo Order `json:"orderInfo"`
+	type Result struct {
+		OrderInfo Order `json:"order_info"`
 	}
-	var output Output
-	if err = json.Unmarshal(data, &output); err != nil {
+	var result Result
+	if err := json.Unmarshal(raw, &result); err != nil {
 		return nil, err
 	}
-	return &output.OrderInfo, nil
+	return &result.OrderInfo, nil
 }
 
-func (client *Client) CancelOrder(symbol string, orderId int64) error {
-	params := url.Values{}
-	params.Set("symbol", strings.ToLower(strings.Replace(symbol, "_", "", -1)))
-	params.Set("order_id", strconv.FormatInt(orderId, 10))
-	if _, err := client.post("/v1/orders/cancel", params, 5); err != nil {
-		return err
-	}
-	return nil
+func (client *Client) CancelOrder(symbol, orderId string) error {
+	params := make(map[string]interface{})
+	params["instrument_name"] = symbol
+	params["order_id"] = orderId
+	_, err := client.post("private/cancel-order", params, 150)
+	return err
 }
 
 func (client *Client) OpenOrders(symbol string) ([]Order, error) {
-	call := func(params url.Values) (int, []Order, error) {
-		var (
-			err  error
-			data json.RawMessage
-		)
-		if data, err = client.post("/v1/openOrders", params, 1); err != nil {
+	call := func(params map[string]interface{}) (int, []Order, error) {
+		raw, err := client.post("private/get-open-orders", params, 30)
+		if err != nil {
 			return 0, nil, err
 		}
-		type Output struct {
-			Count      int     `json:"count"`
-			ResultList []Order `json:"resultList"`
+		type Result struct {
+			Count     int     `json:"count"`
+			OrderList []Order `json:"order_list"`
 		}
-		var output Output
-		if err = json.Unmarshal(data, &output); err != nil {
+		var result Result
+		if err := json.Unmarshal(raw, &result); err != nil {
 			return 0, nil, err
 		}
-		return output.Count, output.ResultList, nil
+		return result.Count, result.OrderList, nil
 	}
 
 	var (
@@ -575,7 +550,7 @@ func (client *Client) OpenOrders(symbol string) ([]Order, error) {
 		result []Order
 	)
 
-	count, orders, err := call(params(symbol, page, pageSize))
+	count, orders, err := call(params(symbol, page))
 	if err != nil {
 		return nil, err
 	}
@@ -583,7 +558,7 @@ func (client *Client) OpenOrders(symbol string) ([]Order, error) {
 
 	for len(result) < count {
 		page++
-		_, orders, err := call(params(symbol, page, pageSize))
+		_, orders, err := call(params(symbol, page))
 		if err != nil {
 			return nil, err
 		}
@@ -594,23 +569,20 @@ func (client *Client) OpenOrders(symbol string) ([]Order, error) {
 }
 
 func (client *Client) MyTrades(symbol string) ([]Trade, error) {
-	call := func(params url.Values) (int, []Trade, error) {
-		var (
-			err  error
-			data json.RawMessage
-		)
-		if data, err = client.post("/v1/myTrades", params, 1); err != nil {
+	call := func(params map[string]interface{}) (int, []Trade, error) {
+		raw, err := client.post("private/get-trades", params, 1)
+		if err != nil {
 			return 0, nil, err
 		}
-		type Output struct {
-			Count      int     `json:"count"`
-			ResultList []Trade `json:"resultList"`
+		type Result struct {
+			Count     int     `json:"count"`
+			TradeList []Trade `json:"trade_list"`
 		}
-		var output Output
-		if err = json.Unmarshal(data, &output); err != nil {
+		var result Result
+		if err := json.Unmarshal(raw, &result); err != nil {
 			return 0, nil, err
 		}
-		return output.Count, output.ResultList, nil
+		return result.Count, result.TradeList, nil
 	}
 
 	var (
@@ -618,7 +590,7 @@ func (client *Client) MyTrades(symbol string) ([]Trade, error) {
 		result []Trade
 	)
 
-	count, trades, err := call(params(symbol, page, pageSize))
+	count, trades, err := call(params(symbol, page))
 	if err != nil {
 		return nil, err
 	}
@@ -626,15 +598,11 @@ func (client *Client) MyTrades(symbol string) ([]Trade, error) {
 
 	for len(result) < count {
 		page++
-		_, trades, err := call(params(symbol, page, pageSize))
+		_, trades, err := call(params(symbol, page))
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, trades...)
-	}
-
-	for i := range result {
-		result[i].Symbol = symbol
 	}
 
 	return result, nil

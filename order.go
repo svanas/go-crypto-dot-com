@@ -1,97 +1,56 @@
 package crypto
 
 import (
-	"strings"
 	"time"
 )
 
-type OrderSide int
+type OrderSide string
 
 const (
-	ORDER_SIDE_UNKNOWN OrderSide = iota
-	BUY
-	SELL
+	BUY  OrderSide = "BUY"
+	SELL OrderSide = "SELL"
 )
 
-var OrderSideString = map[OrderSide]string{
-	ORDER_SIDE_UNKNOWN: "",
-	BUY:                "BUY",
-	SELL:               "SELL",
-}
-
-func (os *OrderSide) String() string {
-	return OrderSideString[*os]
-}
-
-type OrderType int
+type OrderType string
 
 const (
-	ORDER_TYPE_UNKNOWN OrderType = iota
-	LIMIT
-	MARKET
+	LIMIT             OrderType = "LIMIT"
+	MARKET            OrderType = "MARKET"
+	STOP_LOSS         OrderType = "STOP_LOSS"
+	STOP_LIMIT        OrderType = "STOP_LIMIT"
+	TAKE_PROFIT       OrderType = "TAKE_PROFIT"
+	TAKE_PROFIT_LIMIT OrderType = "TAKE_PROFIT_LIMIT"
 )
 
-var OrderTypeString = map[OrderType]string{
-	ORDER_TYPE_UNKNOWN: "",
-	LIMIT:              "1",
-	MARKET:             "2",
-}
-
-func (ot *OrderType) String() string {
-	return OrderTypeString[*ot]
-}
+type TimeInForce string
 
 const (
-	ORDER_STATUS_INIT           = 0 // initial order
-	ORDER_STATUS_NEW            = 1 // new order, unfinished business enters the market
-	ORDER_STATUS_FILLED         = 2 // full deal
-	ORDER_STATUS_PART_FILLED    = 3 // partial transaction
-	ORDER_STATUS_CANCELED       = 4 // order cancelled
-	ORDER_STATUS_PENDING_CANCEL = 5 // order will be cancelled
-	ORDER_STATUS_EXPIRED        = 6 // abnormal order
+	GOOD_TILL_CANCEL    TimeInForce = "GOOD_TILL_CANCEL"
+	FILL_OR_KILL        TimeInForce = "FILL_OR_KILL"
+	IMMEDIATE_OR_CANCEL TimeInForce = "IMMEDIATE_OR_CANCEL"
+)
+
+type OrderStatus string
+
+const (
+	ORDER_STATUS_ACTIVE   OrderStatus = "ACTIVE"
+	ORDER_STATUS_CANCELED OrderStatus = "CANCELED"
+	ORDER_STATUS_FILLED   OrderStatus = "FILLED"
+	ORDER_STATUS_REJECTED OrderStatus = "REJECTED"
+	ORDER_STATUS_EXPIRED  OrderStatus = "EXPIRED"
 )
 
 type Order struct {
-	Id           int64       `json:"id,string"`
-	Side         string      `json:"side"`
-	TotalPrice   float64     `json:"total_price,string,omitempty"`
-	Fee          float64     `json:"fee,string,omitempty"`
-	CreatedAt    int64       `json:"created_at,omitempty"`
-	UpdatedAt    int64       `json:"updated_at,omitempty"`
-	DealPrice    float64     `json:"deal_price,string,omitempty"`
-	AvgPrice     float64     `json:"avg_price,string,omitempty"`
-	CountCoin    string      `json:"countCoin,omitempty"`
-	Source       int         `json:"source,omitempty"`
-	Type         interface{} `json:"type,omitempty"`
-	SideMsg      string      `json:"side_msg,omitempty"`
-	Volume       float64     `json:"volume,string,omitempty"`
-	Price        float64     `json:"price,string,omitempty"`
-	StatusMsg    string      `json:"status_msg,omitempty"`
-	DealVolume   float64     `json:"deal_volume,string,omitempty"`
-	FeeCoin      string      `json:"fee_coin,omitempty"`
-	RemainVolume float64     `json:"remain_volume,string,omitempty"`
-	BaseCoin     string      `json:"baseCoin,omitempty"`
-	Status       int         `json:"status,omitempty"`
-}
-
-func (order *Order) GetSide() OrderSide {
-	for os := range OrderSideString {
-		if os.String() == order.Side {
-			return os
-		}
-	}
-	return ORDER_SIDE_UNKNOWN
-}
-
-func (order *Order) GetType() OrderType {
-	switch order.Type {
-	case 1, "1":
-		return LIMIT
-	case 2, "2":
-		return MARKET
-	default:
-		return ORDER_TYPE_UNKNOWN
-	}
+	Status    OrderStatus `json:"status"`           // ACTIVE, CANCELED, FILLED, REJECTED or EXPIRED
+	Reason    interface{} `json:"reason,omitempty"` // reason -- only for REJECTED orders
+	Side      OrderSide   `json:"side"`             // BUY or SELL
+	Price     float64     `json:"price,omitempty"`
+	Quantity  float64     `json:"quantity"`
+	OrderId   string      `json:"order_id"`
+	CreatedAt int64       `json:"create_time"`
+	UpdatedAt int64       `json:"update_time"`
+	Type      OrderType   `json:"type"`
+	Symbol    string      `json:"instrument_name"`
 }
 
 func (order *Order) GetCreatedAt() time.Time {
@@ -106,8 +65,4 @@ func (order *Order) GetUpdatedAt() time.Time {
 		return time.Unix(order.UpdatedAt/1000, 0)
 	}
 	return time.Time{}
-}
-
-func (order *Order) GetSymbol() string {
-	return strings.ToUpper(order.BaseCoin) + "_" + strings.ToUpper(order.CountCoin)
 }

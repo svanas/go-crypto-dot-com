@@ -3,30 +3,20 @@ package crypto
 import "time"
 
 type Trade struct {
-	Id        int64   `json:"id,string"`
-	Volume    float64 `json:"volume,string"`
-	Side      string  `json:"side"`
-	FeeCoin   string  `json:"feeCoin"`
-	Price     float64 `json:"price,string"`
-	Fee       float64 `json:"fee,string"`
-	CTime     int64   `json:"ctime"`
-	DealPrice float64 `json:"deal_price,string"`
-	Type      string  `json:"type"`
-	Symbol    string  `json:"symbol"`
-}
-
-func (trade *Trade) GetSide() OrderSide {
-	for os := range OrderSideString {
-		if os.String() == trade.Side {
-			return os
-		}
-	}
-	return ORDER_SIDE_UNKNOWN
+	Side        OrderSide `json:"side"`            // BUY or SELL
+	Symbol      string    `json:"instrument_name"` // e.g. ETH_CRO, BTC_USDT
+	Fee         float64   `json:"fee"`             // trade fee
+	TradeId     string    `json:"trade_id"`        // trade ID
+	CreatedAt   int64     `json:"create_time"`     // trade creation time
+	Price       float64   `json:"traded_price"`    // executed trade price
+	Quantity    float64   `json:"traded_quantity"` // executed trade quantity
+	FeeCurrency string    `json:"fee_currency"`    // currency used for the fees (e.g. CRO)
+	OrderId     string    `json:"order_id"`
 }
 
 func (trade *Trade) GetCreatedAt() time.Time {
-	if trade.CTime > 0 {
-		return time.Unix(trade.CTime/1000, 0)
+	if trade.CreatedAt > 0 {
+		return time.Unix(trade.CreatedAt/1000, 0)
 	}
 	return time.Time{}
 }

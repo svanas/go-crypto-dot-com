@@ -27,7 +27,7 @@ func TestTickers(t *testing.T) {
 		t.Errorf("Tickers() failed: %v", err)
 	}
 
-	if len(tickers.Ticker) == 0 {
+	if len(tickers) == 0 {
 		t.Error("Tickers() returned an empty response")
 	}
 
@@ -51,6 +51,14 @@ func TestOrderBook(t *testing.T) {
 	book, err := client.OrderBook("ETH_BTC")
 	if err != nil {
 		t.Errorf("OrderBook(\"ETH_BTC\") failed: %v", err)
+	}
+
+	if len(book.Bids) == 0 {
+		t.Error("OrderBook(\"ETH_BTC\").Bids returned an empty response")
+	}
+
+	if len(book.Asks) == 0 {
+		t.Error("OrderBook(\"ETH_BTC\").Asks returned an empty response")
 	}
 
 	t.Logf("%+v", book)

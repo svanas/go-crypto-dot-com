@@ -1,11 +1,9 @@
 package crypto
 
 type Account struct {
-	TotalAsset float64 `json:"total_asset,string"`
-	CoinList   []struct {
-		Normal       float64     `json:"normal,string"`
-		Locked       float64     `json:"locked,string"`
-		BtcValuation interface{} `json:"btcValuation"`
-		Coin         string      `json:"coin"`
-	} `json:"coin_list"`
+	Balance   float64 `json:"balance"`   // total balance
+	Available float64 `json:"available"` // available balance (e.g. not in orders, or locked, etc.)
+	Order     float64 `json:"order"`     // balance locked in orders
+	Stake     float64 `json:"stake"`     // balance locked for staking (typically only used for CRO)
+	Currency  string  `json:"currency"`  // e.g. CRO
 }
